@@ -8,7 +8,8 @@ from nltk.stem import WordNetLemmatizer
 from nltk.sentiment import SentimentIntensityAnalyzer
 import speech_recognition as sr
 
-# Download NLTK resources
+# ========== Setup ==========
+# Download NLTK resources (only once)
 nltk.download("stopwords")
 nltk.download("wordnet")
 nltk.download("vader_lexicon")
@@ -18,24 +19,19 @@ lemmatizer = WordNetLemmatizer()
 sia = SentimentIntensityAnalyzer()
 stop_words = set(stopwords.words("english"))
 
-# Mobile-friendly styling
+# ========== Styling ==========
 st.markdown("""
     <style>
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
+    .block-container { padding: 1rem; }
     @media only screen and (max-width: 600px) {
-        .block-container {
-            padding-left: 0.5rem;
-            padding-right: 0.5rem;
-        }
+        .block-container { padding: 0.5rem; }
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# Preprocessing without punkt
+# ========== Helper Functions ==========
 def preprocess_text(text):
+    """Clean and lemmatize text."""
     text = text.lower()
     text = re.sub(r'[^\w\s]', '', text)
     tokens = text.split()
@@ -43,19 +39,14 @@ def preprocess_text(text):
     return " ".join(tokens)
 
 def analyze_sentiment(text):
-    processed_text = preprocess_text(text)
-    score = sia.polarity_scores(processed_text)["compound"]
+    """Analyze sentiment of the text."""
+    processed = preprocess_text(text)
+    score = sia.polarity_scores(processed)["compound"]
     label = "Positive" if score > 0 else "Negative" if score < 0 else "Neutral"
-    return processed_text, score, label
+    return processed, score, label
 
-# App title
-st.title("📱 Sentiment Analysis App (Text | CSV | Speech)")
-
-# Upload section
-st.header("📂 Upload CSV or TXT")
-uploaded_file = st.file_uploader("Upload your file", type=["csv", "txt"])
-
-if uploaded_file is not None:
+def handle_uploaded_file(uploaded_file):
+    """Read and process uploaded CSV or TXT file."""
     try:
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
@@ -66,56 +57,68 @@ if uploaded_file is not None:
         st.subheader("📋 Dataset Preview")
         st.dataframe(df.head())
 
-        # Detect text column
-        text_column = None
-        for col in df.columns:
-            if df[col].dtype == "object":
-                text_column = col
-                break
+        # Detect text column automatically
+        text_col = next((col for col in df.columns if df[col].dtype == "object"), None)
 
-        if text_column:
-            df[["Processed_Text", "Sentiment_Score", "Sentiment_Label"]] = df[text_column].apply(
+        if text_col:
+            df[["Processed_Text", "Sentiment_Score", "Sentiment_Label"]] = df[text_col].apply(
                 lambda x: pd.Series(analyze_sentiment(str(x)))
             )
+
             st.subheader("✅ Sentiment Analysis Results")
-            st.dataframe(df[[text_column, "Processed_Text", "Sentiment_Label"]])
+            st.dataframe(df[[text_col, "Processed_Text", "Sentiment_Label"]])
 
             st.subheader("📊 Sentiment Distribution")
             fig, ax = plt.subplots()
             df["Sentiment_Label"].value_counts().plot(kind="bar", ax=ax, color=["green", "red", "gray"])
+            plt.xticks(rotation=0)
             st.pyplot(fig)
         else:
-            st.warning("No text column found.")
-
+            st.warning("❗ No valid text column found.")
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        st.error(f"Error processing file: {e}")
 
-# Text input
-st.header("📝 Real-time Text Sentiment")
-user_text = st.text_area("Enter a comment or message:")
+# ========== App Main ==========
+def main():
+    st.title("📱 Sentiment Analysis App (Text | CSV | Speech)")
 
-if user_text:
-    processed, score, label = analyze_sentiment(user_text)
-    st.success(f"**Sentiment:** {label}")
-    st.write(f"**Processed:** {processed}")
-    st.write(f"**Score:** {score}")
+    # Upload file section
+    st.header("📂 Upload CSV or TXT")
+    uploaded_file = st.file_uploader("Upload your file", type=["csv", "txt"])
 
-# Speech input
-st.header("🎤 Real-time Speech Sentiment")
-if st.button("🎙️ Start Recording"):
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("Speak now...")
-        audio = recognizer.listen(source)
+    if uploaded_file:
+        handle_uploaded_file(uploaded_file)
 
-        try:
-            text = recognizer.recognize_google(audio)
-            st.write(f"**You said:** {text}")
-            processed, score, label = analyze_sentiment(text)
-            st.success(f"**Sentiment:** {label}")
-            st.write(f"**Processed:** {processed}")
-            st.write(f"**Score:** {score}")
-        except sr.UnknownValueError:
-            st.error("Speech not understood.")
-        except sr.RequestError as e:
-            st.error(f"Speech service error: {e}")
+    # Real-time text input
+    st.header("📝 Real-time Text Sentiment")
+    user_text = st.text_area("Enter a comment or message:")
+
+    if user_text:
+        processed, score, label = analyze_sentiment(user_text)
+        st.success(f"**Sentiment:** {label}")
+        st.write(f"**Processed Text:** {processed}")
+        st.write(f"**Score:** {score}")
+
+    # Real-time speech input
+    st.header("🎤 Real-time Speech Sentiment")
+    if st.button("🎙️ Start Recording"):
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            st.info("Listening... Speak now!")
+            audio = recognizer.listen(source)
+
+            try:
+                text = recognizer.recognize_google(audio)
+                st.write(f"**You said:** {text}")
+                processed, score, label = analyze_sentiment(text)
+                st.success(f"**Sentiment:** {label}")
+                st.write(f"**Processed Text:** {processed}")
+                st.write(f"**Score:** {score}")
+            except sr.UnknownValueError:
+                st.error("❌ Could not understand your speech.")
+            except sr.RequestError as e:
+                st.error(f"❌ Speech Recognition service error: {e}")
+
+# ========== Run App ==========
+if __name__ == "__main__":
+    main()
